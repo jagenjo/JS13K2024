@@ -62,22 +62,23 @@ C.a /= dist*1.2;
 #endif
 fragColor=C+emis;
 }
-`,fx_fs=`in vec2 _uv;IN S2D tex;IN float R;vec2 barrel(vec2 uv,float v){vec2 st=uv-0.5;float t=atan(st.x,st.y);float r=sqrt(dot(st,st));r*=1.0+v*(r*r);return 0.5+r*vec2(sin(t),cos(t));}
+`,fx_fs=`in vec2 _uv;IN S2D tex;IN S2D texB;IN float R;vec2 barrel(vec2 uv,float v){vec2 st=uv-0.5;float t=atan(st.x,st.y);float r=sqrt(dot(st,st));r*=1.0+v*(r*r);return 0.5+r*vec2(sin(t),cos(t));}
 void main(){
+    vec2 uv=_uv+(texture(texB,_uv).xy-vec2(0.5))*0.04;
     float l=length(_uv-vec2(0.5));
     if(l>R)discard;
     if(l>R*0.98)fragColor=vec4(0.1);
     else{
     float vig=pow(1.0-l/0.45,0.5);
-    fragColor=vig*(texture(tex,barrel(_uv,-1.2),2.0)*0.5+texture(tex,barrel(_uv,-1.2),4.0)*0.5+texture(tex,barrel(_uv,-1.2))*1.5);;}
+    fragColor=vig*(texture(tex,barrel(uv,-1.2),2.0)*0.5+texture(tex,barrel(uv,-1.2),4.0)*0.5+texture(tex,barrel(uv,-1.2))*1.5);;}
     }
 `,
-final_fs=`in vec2 _uv;IN S2D tex;IN float D;IN float time;
+final_fs=`in vec2 _uv;IN S2D tex;IN float D;IN float V;IN float time;
 void main(){
     float l=_uv.y+0.1*round(10.0*sin(_uv.x+time)*cos(_uv.x*0.3+time*1.2))*0.1;
     vec4 C=texture(tex,_uv+vec2(0.0,l<D?sin(time*2.0)*0.01:0.0),l<D?3.0:0.0);
     if(l<D){C.xy*=0.8;C.xyz+=vec3(l-D)*0.2;}
-    fragColor=C;;}
+    fragColor=C*V;;}
 `
 
 //array helpers
@@ -183,12 +184,8 @@ var WPs=[[234,20,362],[237,32,360],[232,41,360],[240,50,359],[264,48,360],[277,4
 var start=[WSIZE/2,HSIZE*1.5,WSIZE/4],targets=[[223,20,368]],TRG=V3(),TRGdist=1000,sonarbeep=0,out=0,WPBUFFER=BUFFER(WPs.flat(),3)
 
 //player 
-var HMODEL=M4(),AMODEL=M4(),UItex=0,isInside=0,signal=0.1,totarget=V3(),spark=0,nrg=0,batt=0,shake=0,PLY=0
-RESET=()=>{
-    PLY={pos:V3(start),ang:0,nrg:1,spot:2,sonar:100,scan:1,hasTRG:0,vel:V3(),dmg:0.1,open:0,life:1.1,batt:1,speed:[0,0,0]},P=PLY.pos
-    TRG=V3(targets[0]);DIV.style.fontSize=""
-}
-RESET()
+var HMODEL=M4(),AMODEL=M4(),UItex=0,isInside=0,signal=0.1,totarget=V3(),spark=0,nrg=0,batt=0,shake=0,gear=0;PLY=0
+
 
 //snake
 var SNK={pos:V3(WPs[0]),index:0,ang:0,call:4,dist:10000,tail:0}
@@ -197,8 +194,37 @@ SNK.part=(v)=>SNK.tail.d.subarray(v*4,v*4+3)
 for(i=1;i<50;++i)SNK.tail.d.set([SNK.pos[0]+i,SNK.pos[1],SNK.pos[2]+5,LERP(1.5,0.2,i/50)],i*4)
 SNK.tail.update();
 
-UIctx=document.createElement("canvas").getContext("2d")//for UI
+NEWCANVAS=()=>document.createElement("canvas").getContext("2d")
+let UIctx=NEWCANVAS(),GLASSctx=NEWCANVAS(),GLASS=0//for breaking glass
+GLASSctx.canvas.width=GLASSctx.canvas.height=512
+GLASS=TEX(512,512,GLASSctx.canvas);
 var INRANGE=(v,min,max)=>v>=min&&v<max
+
+BREAKGLASS=(v)=>{
+    let c=GLASSctx
+    if(v){GLASSctx.fillStyle="#777";GLASSctx.fillRect(0,0,512,512)}
+    else{c.save();
+    c.globalCompositeOperation='difference';
+    c.strokeStyle="#111"
+    c.fillStyle="#"+(RAND(16)|0).toString(16)+(RAND(16)|0).toString(16)+"0"
+    c.beginPath();
+    c.moveTo(RAND(1e3,-100),RAND(1e3,-100));
+    for(i=0;i<5;++i)
+        c.lineTo(RAND(512),RAND(512));
+    c.fill();c.stroke();
+    c.restore();
+    }
+    GLASS.update(GLASSctx.canvas)
+    GLASS.mips()
+}
+BREAKGLASS(1)
+
+RESET=()=>{
+    PLY={pos:V3(start),ang:0,nrg:1,spot:2,sonar:100,scan:1,hasTRG:0,vel:V3(),dmg:0.1,open:0,life:1.1,batt:1,speed:[0,0,0]},P=PLY.pos
+    TRG=V3(targets[0]);DIV.style.fontSize=""
+    BREAKGLASS(1);
+}
+RESET()
 
 //audio stuff
 var ACX,ADEST,AVOL,asea,abeep,asnk,asonar,ashake
@@ -236,8 +262,8 @@ let gradient;
 var eye=V3(),target=V3(),front=V3(),IMP=V3()
 CAM_EYE.set([180,5,-250])
 loop=()=>{
-    if(!WORLD)GENWORLD()
     requestAnimationFrame(loop)
+    if(!WORLD)GENWORLD()
     NOW=TIME()
     var dt=MIN(0.1,NOW-PREV);PREV=NOW
     var W=C.width=BODY.offsetWidth,H=C.height=BODY.offsetHeight,_W=W>>2,_H=H>>2
@@ -310,6 +336,7 @@ loop=()=>{
         ctx.restore()
     }
     RECT(0,0,_W,_H,"#111")//bg
+    FCOLOR("#ccc");ctx.fillText("by TAMAT",_W-20,_H-4)
     ctx.save();ctx.translate(_W/2-_H/1.5,0);
     for(i=0;i<4;++i)
         RECT(_H*-[0.12,0.06,0.04,0.02][i],0,_H*0.2/(i+1),_H,["#000","#222","#333","#444"][i])//pipe
@@ -318,7 +345,8 @@ loop=()=>{
     DIAL("ATM",0,dsize+10,dsize,14,press+RAND(0.2*SAT(press-0.8)),1,1)//pressure
     //gear
     ctx.strokeStyle="#371911";ctx.lineWidth=3
-    ctx.translate(0,_H/2);ctx.rotate(PLY.open)
+    gear=LERP(PLY.open,gear,0.99)
+    ctx.translate(0,_H/2);ctx.rotate(gear*10)
     ctx.beginPath();
     for(i=0;i<8;++i){ctx.rotate(PI*2/8);ctx.moveTo(0,0);ctx.lineTo(-8.5,19);ctx.lineTo(7,20)}
     ctx.stroke();
@@ -421,8 +449,10 @@ loop=()=>{
 
     //add main view
     GLSET(BLEND,0)
-    VIEWPORT(_W/2-_H/2,0,_H,_H) 
-    fboView.tex.toVP(sh_fx,{R:0.5})
+    VIEWPORT(_W/2-_H/2,0,_H,_H)
+    GLASS.bind(1)
+    fboView.tex.toVP(sh_fx,{R:0.5,texB:1})
+    //GLASS.toVP()
 
     //add sonar view
     VIEWPORT(_W/2+_H/2.3,_H/1.8,_H/2.2,_H/2.2)
@@ -446,7 +476,7 @@ loop=()=>{
     fbo.tex.mips()
     GLSET(BLEND,0)
     VIEWPORT(0,0,W,H)
-    fbo.tex.toVP(sh_final,{time:GTIME,D:PLY.dmg*1.5-0.3})
+    fbo.tex.toVP(sh_final,{time:GTIME,D:PLY.dmg*1.5-0.3,V:PLY.life>0.2?1:MAX(0,PLY.life*5)})
 
 
 
@@ -501,7 +531,7 @@ loop=()=>{
     PLY.ang+=dt*PLY.speed[0]*0.2
     ADD(P,P,PLY.vel,dt)
     SCALE(IMP,front,PLY.speed[2]);
-    ADD(IMP,IMP,UP,PLY.speed[1]);
+    ADD(IMP,IMP,UP,PLY.speed[1]-PLY.dmg*10);
     ADD(PLY.vel,PLY.vel,IMP,dt);
     SCALE(PLY.vel,PLY.vel,0.95);
     PLY.speed[0] *= 0.99;
@@ -510,6 +540,10 @@ loop=()=>{
 
     PLY.batt -= dt*(PLY.nrg=4+PLY.sonar/50+PLY.spot*2+PLY.speed[2]/10+PLY.scan*2)*0.0001;
     if(PLY.batt<=0){PLY.life-=dt*0.02;PLY.spot=0;PLY.sonar=0;PLY.nrg=0}
+    if(PLY.dmg>=1)PLY.life-=dt*0.1
+
+    if(P[1]<10&&RAND()<0.001)PLY.open=1
+    if(P[1]<10&&RAND()<0.01)BREAKGLASS()
     
 
     //COLLISIONS
@@ -518,12 +552,14 @@ loop=()=>{
     //for(i=-1;i<=1;++i)for(j=-1;j<=1;++j)for(k=-1;k<=1;++k)
         isInside|=GETW(P[0],P[1],P[2])
     if(isInside&&!DEBUG){
+        let l=LEN(PLY.vel)
         //console.log(LEN(PLY.vel))
         if(RAND()<0.1)PLY.open=1
         PLY.pos.set(prevpos)
         SCALE(PLY.vel,PLY.vel,-0.8)
         PLY.speed.fill(0)
-        shake+=1
+        shake+=l*0.01
+        if(l>2)BREAKGLASS()
     }
     for(i=0;i<3;++i)P[i]=CLAMP(P[i],[5,1,5][i],[WSIZE-5,HSIZE*2+2,WSIZE-5][i])//avoid scaping
 
@@ -564,7 +600,7 @@ loop=()=>{
     if(MOUSE.buttons&&!ACX)STARTAUDIO();
 }
 
-loop();
+requestAnimationFrame(loop);//instead of loop()
 
 /*
 ONMOUSE=(e)=>{
