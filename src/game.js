@@ -21,6 +21,7 @@ float id=float(gl_InstanceID);
 wpos=ROTY(wpos,id);
 wpos*=offs.w*scale;
 wpos+=offs.xyz;
+vcol.xyz+=vec3(sin(wpos.y*0.2+wpos.z*0.3+wpos.x*0.1+cos(wpos.x*0.1)*0.5))*0.1;
 #endif
 wpos=(model*vec4(wpos,1.0)).xyz;
 gl_PointSize=(sin(float(gl_VertexID))*0.5+1.2);
@@ -33,6 +34,7 @@ IN vec3 ceye;
 IN vec3 cfront;
 IN float spot;
 IN vec3 target;
+IN vec3 flare;
 vec3 scolor=vec3(.04,.06,.07);
 vec3 fcolor=vec3(.2,.5,.8);
 IN float time;
@@ -57,6 +59,7 @@ vec3 F=(cfront+vec3(0.0,-0.1,0.0));
 light += vec3(0.6,0.7,0.8)*(dot(N,-F)*0.25+0.75)*smoothstep(0.92,0.99,max(0.0,dot(F,E)))*spotatt*spot;
 C.xyz=mix(C.xyz*light,scolor,fog);
 C.xyz+=vec3(0.2,0.5,0.3)*pow(clamp(1.0 - length(target-wpos)/15.0,0.0,1.0),2.5);
+C.xyz+=vec3(1.2,0.3,0.1)*pow(clamp(1.0 - length(flare-wpos)/5.0,0.0,1.0),2.5);
 #else
 C.a /= dist*1.2;
 #endif
@@ -180,11 +183,11 @@ DBUFFER=BUFFER(new F32(10240*3),3,35048)//damage water
 var DMG=[],ADDPART=(p)=>DMG.length<10240?DMG.push({p,v:SUB(V3(),[RAND(0.2,0.4),RAND(-0.2),0],p),t:3}):0
 
 //level //[279,19,313],[336,8,468],
-var WPs=[[234,20,362],[237,32,360],[232,41,360],[240,50,359],[264,48,360],[277,40,361],[288,40,369],[288,51,369],[297,60,376],[290,73,391],[272,93,421]]
-var start=[WSIZE/2,HSIZE*1.5,WSIZE/4],targets=[[223,20,368]],TRG=V3(),TRGdist=1000,sonarbeep=0,out=0,WPBUFFER=BUFFER(WPs.flat(),3)
+var WPs=[[228,19,364],[247,29,371],[239,37,385],[245,39,398],[258,50,400],[271,61,399],[260,69,381],[261,84,357],[272,93,421],[290,73,391],[297,60,376],[288,51,369],[288,40,369],[277,40,361],[264,48,360],[240,50,359],[232,41,360],[237,32,360],[234,20,362]]
+var start=[WSIZE/2,HSIZE*1.5,WSIZE/4],targets=[[182,20,329],[298,22,271]],flares=[[255,82,319],[219,81,218]],TRG=V3(),FLR=V3();TRGdist=1000,sonarbeep=0,out=0,WPBUFFER=BUFFER(WPs.flat(),3)
 
 //player 
-var HMODEL=M4(),AMODEL=M4(),UItex=0,isInside=0,signal=0.1,totarget=V3(),spark=0,nrg=0,batt=0,shake=0,gear=0;PLY=0
+var HMODEL=M4(),AMODEL=M4(),UItex=0,level=0,isInside=0,signal=0.1,totarget=V3(),spark=0,nrg=0,batt=0,shake=0,boom=0,gear=0;PLY=0
 
 
 //snake
@@ -221,7 +224,7 @@ BREAKGLASS(1)
 
 RESET=()=>{
     PLY={pos:V3(start),ang:0,nrg:1,spot:2,sonar:100,scan:1,hasTRG:0,vel:V3(),dmg:0.1,open:0,life:1.1,batt:1,speed:[0,0,0]},P=PLY.pos
-    TRG=V3(targets[0]);DIV.style.fontSize=""
+    TRG=V3(targets[level]);FLR=V3(flares[level]);DIV.style.fontSize=""
     BREAKGLASS(1);
 }
 RESET()
@@ -280,7 +283,7 @@ loop=()=>{
     if(PLY.won)
         m="Mission Accomplished, Time: " + (PLY.time|0) + "s"
     else if(PLY.life<=0)
-        m="You are dead, press SPACE to restart"
+        m="You drowned, press SPACE to restart"
     else if(PLY.open>0)
         m="FIX LEAK, press G multiple times!!"
     else if(PLY.hasTRG)
@@ -300,7 +303,7 @@ loop=()=>{
         asonar.volume(PLY.sonar?0.1*POW(1-f,2.0):0)
         asonar.filter.frequency.value=800-f*200
         asonar.filter.Q.value=30+RAND()*5
-        ashake.volume(shake*0.5)
+        ashake.volume(SAT((shake+boom)*10))
         ashake.freq(RAND(140,50))
     }
 
@@ -344,12 +347,14 @@ loop=()=>{
     let press=1-SAT(P[1]/170)
     DIAL("ATM",0,dsize+10,dsize,14,press+RAND(0.2*SAT(press-0.8)),1,1)//pressure
     //gear
-    ctx.strokeStyle="#371911";ctx.lineWidth=3
+    
     gear=LERP(PLY.open,gear,0.99)
-    ctx.translate(0,_H/2);ctx.rotate(gear*10)
+    ctx.translate(0,_H/2);CIRCLE(0,0,8,"#111");ctx.rotate(gear*10)
+    for(j=0;j<3;++j){
+    ctx.lineWidth=3-j;ctx.strokeStyle=["#210","#371911","#520"][j]
     ctx.beginPath();
     for(i=0;i<8;++i){ctx.rotate(PI*2/8);ctx.moveTo(0,0);ctx.lineTo(-8.5,19);ctx.lineTo(7,20)}
-    ctx.stroke();
+    ctx.stroke();}
     CIRCLE(0,0,3,"#111")
     ctx.restore();
 
@@ -401,15 +406,16 @@ loop=()=>{
     //sea floor
     for(b of BLOCKS)
         if(CAMTESTBOX(b.pos,[BSIZE,HSIZE,BSIZE]))
-            DRAW("head",sh_inst,{color:[0.5,0.6,0.7,0.1],target:TRG,scale:1,emis:V4,spot:PLY.spot,model:AMODEL},4,b.num,{offs:b.insts})
+            DRAW("head",sh_inst,{color:[0.5,0.6,0.7,0.1],target:TRG,flare:FLR,scale:1,emis:V4,spot:PLY.spot,model:AMODEL},4,b.num,{offs:b.insts})
     if(PLY.hasTRG)ADD(TRG,eye,[front[0],front[1]-0.7,front[2]],0.75)
     DRAW("head",sh,{color:[0.1,0.1,0.1,1],emis:[0.2,0.5,0.3,0],spot:PLY.spot*2,model:TRS(HMODEL,TRG,0,1)})//Target
+    DRAW("head",sh,{color:[0.1,0.1,0.1,1],emis:[RAND(),RAND(0.3),0,0],model:TRS(HMODEL,FLR,0,0.2)})//flare
     BLENDFUNC("A")
     for(i=0;i<4;++i)//SNAKE
       DRAW("head",sh_inst,{color:[0.1,0.1,0.1,0.2],scale:0.5+i/4,emis:(!i&&spark)?[0,1,3,0]:[-0.02,-0.02,-0.02,0],spot:PLY.spot*2,model:AMODEL},5,50,{offs:SNK.tail})//snake
     if(!out) for(i=-2;i<=2;++i)for(j=-1;j<=1;++j)for(k=-2;k<=2;++k) //dust
         DRAW({pos:PBUFFER,0:256},sh_points,{color:[0.7,0.8,0.9,0.3],emis:V4,model:TRS(HMODEL,[ROUND(P[0]/8+i)*8,ROUND(P[1]/8+j)*8,ROUND(P[2]/8+k)*8],0,1)},0)
-    //if(DEBUG&&WPs.length)DRAW({pos:WPBUFFER,0:WPs.length},0,{color:[1,1,1,1],model:AMODEL},3)//DEBUG line
+    if(DEBUG&&WPs.length)DRAW({pos:WPBUFFER,0:WPs.length},0,{color:[1,1,1,1],model:AMODEL},3)//DEBUG line
         
     //landscape
     sh.uniforms({time:GTIME})
@@ -494,7 +500,7 @@ loop=()=>{
 
     prevpos=V3(P)
 
-    /*
+    //*
     if(DEBUG){
         if(KEYS["W"])ADD(P,P,front,dt*50.5)
         if(KEYS["S"])ADD(P,P,front,-dt*50.5)
@@ -507,7 +513,7 @@ loop=()=>{
         if(KEYSP["Backspace"]){WPs.pop();WPBUFFER=BUFFER(WPs.flat(),3)}
         if(KEYSP["P"])P.set(TRG)
     }
-    else*/
+    else//*/
     if(!PLY.won&&PLY.life>0&&PLY.batt>0)
     {
         if(KEYS["W"])PLY.speed[2]+=dt*25
@@ -525,7 +531,7 @@ loop=()=>{
         if(KEYSP["Digit2"])PLY.scan=PLY.scan?0:1
         if(KEYS["Space"])SCALE(PLY.speed,PLY.speed,0.99)//break
     }
-    if(KEYSP["Space"]&&(PLY.life<=0||PLY.won))RESET()
+    if(KEYSP["Space"]&&(PLY.life<=0||PLY.won)){PLY.won?level=1:0;RESET()}
     //if(KEYSP["Home"])DEBUG=!DEBUG
 
     PLY.ang+=dt*PLY.speed[0]*0.2
@@ -543,7 +549,7 @@ loop=()=>{
     if(PLY.dmg>=1)PLY.life-=dt*0.1
 
     if(P[1]<10&&RAND()<0.001)PLY.open=1
-    if(P[1]<10&&RAND()<0.01)BREAKGLASS()
+    if(P[1]<8&&RAND()<0.005){BREAKGLASS();boom=1}
     
 
     //COLLISIONS
@@ -555,9 +561,9 @@ loop=()=>{
         let l=LEN(PLY.vel)
         //console.log(LEN(PLY.vel))
         if(RAND()<0.1)PLY.open=1
-        PLY.pos.set(prevpos)
-        SCALE(PLY.vel,PLY.vel,-0.8)
-        PLY.speed.fill(0)
+        P.set(prevpos)
+        SCALE(PLY.vel,PLY.vel,-0.5)
+        PLY.speed[2]=0//PLY.speed[1]=
         shake+=l*0.01
         if(l>2)BREAKGLASS()
     }
@@ -591,7 +597,7 @@ loop=()=>{
     SNK.tail.update();
     if(SNK.dist<10&&spark){PLY.batt-=dt*2;shake+=0.1}
     batt=LERP(batt,PLY.batt,0.01)
-    shake*=0.95
+    shake*=0.95;boom*=0.8
 
     if(!PLY.won&&P[1]>=170&&PLY.hasTRG){PLY.won=1;PLY.time=GTIME;DIV.style.fontSize=120}
 
